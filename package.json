@@ -1,0 +1,50 @@
+{
+  "name": "mistri360-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
+    "build": "node ./build.mjs",
+    "start": "node --env-file-if-exists=.env --enable-source-maps ./dist/index.mjs",
+    "typecheck": "tsc --noEmit",
+    "db:push": "drizzle-kit push --config ./drizzle.config.ts",
+    "seed": "tsx --env-file-if-exists=.env src/scripts/seed.ts",
+    "seed:vehicles": "tsx --env-file-if-exists=.env src/scripts/seed-vehicles.ts",
+    "seed:fleet": "tsx --env-file-if-exists=.env src/scripts/seed-fleet-expansion.ts",
+    "seed:work-orders": "tsx --env-file-if-exists=.env src/scripts/seed-work-orders.ts",
+    "seed:checklists": "tsx --env-file-if-exists=.env src/scripts/seed-checklists.ts"
+  },
+  "dependencies": {
+    "@google-cloud/storage": "^7.21.0",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "drizzle-orm": "^0.45.2",
+    "drizzle-zod": "^0.8.3",
+    "exceljs": "^4.4.0",
+    "express": "^5.2.1",
+    "google-auth-library": "^10.9.1",
+    "pdfkit": "^0.19.1",
+    "pg": "^8.22.0",
+    "pino": "^9.14.0",
+    "pino-http": "^10.5.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.13.1",
+    "@types/pdfkit": "^0.17.6",
+    "@types/pg": "^8.20.0",
+    "drizzle-kit": "^0.31.10",
+    "esbuild": "^0.25.8",
+    "esbuild-plugin-pino": "^2.3.3",
+    "pino-pretty": "^13.1.3",
+    "thread-stream": "3.1.0",
+    "tsx": "^4.23.1",
+    "typescript": "~5.9.3"
+  }
+}

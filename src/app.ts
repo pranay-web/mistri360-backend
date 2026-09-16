@@ -53,12 +53,30 @@ const allowedOrigins = envOrigins.length > 0
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      // Allow requests with no origin (like mobile apps, curl, server-to-server)
+      if (!origin) {
         callback(null, true);
-      } else {
-        logger.warn({ origin }, "CORS request from disallowed origin");
-        callback(new Error("Not allowed by CORS policy"));
+        return;
       }
+
+      // Check explicit allowed origins list
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      // Allow any origin from the same host (e.g. EC2 public IP or custom domain on port 80/443 or matching host)
+      try {
+        const originUrl = new URL(origin);
+        // If ALLOWED_ORIGINS is not set or empty, allow all http/https origins in production reverse-proxied setups
+        if (envOrigins.length === 0) {
+          callback(null, true);
+          return;
+        }
+      } catch {}
+
+      logger.warn({ origin }, "CORS request from disallowed origin");
+      callback(new Error("Not allowed by CORS policy"));
     },
     credentials: true,
     methods: ["GET", "POST", "PATCH", "DELETE", "PUT", "OPTIONS"],

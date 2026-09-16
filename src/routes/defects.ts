@@ -10,16 +10,18 @@ import {
   auditLogTable,
   userNotificationsTable,
 } from "@workspace/db/schema";
-import { eq, and, desc, sql, count } from "drizzle-orm";
+import { eq, and, desc, sql, count, max } from "drizzle-orm";
 import { requireAuth, requireRole } from "../middlewares/auth.js";
 
 async function generateWoNumber(): Promise<string> {
   const year = new Date().getFullYear();
   const [row] = await db
-    .select({ cnt: count() })
+    .select({
+      maxSeq: sql<number>`MAX(CAST(SPLIT_PART(${workOrdersTable.woNumber}, '-', 3) AS INTEGER))`
+    })
     .from(workOrdersTable)
-    .where(sql`EXTRACT(YEAR FROM created_at) = ${year}`);
-  const seq = (row?.cnt ?? 0) + 1;
+    .where(sql`EXTRACT(YEAR FROM ${workOrdersTable.createdAt}) = ${year}`);
+  const seq = (row?.maxSeq ?? 0) + 1;
   return `WO-${year}-${String(seq).padStart(4, "0")}`;
 }
 
@@ -216,19 +218,19 @@ router.post("/defects", requireAuth, async (req, res): Promise<void> => {
     metadata: { vehicleId, vehicleUnitNumber: vehicle.unitNumber } as any,
   });
 
-  // Notify managers/admins about new defect
-  const managers = await db
+  // Notify supervisors, managers, and admins about new defect (not drivers/mechanics)
+  const supervisors = await db
     .select({ id: usersTable.id })
     .from(usersTable)
     .where(and(
       eq(usersTable.companyId, req.user!.companyId!),
-      sql`${usersTable.role} in ('admin','manager')`
+      sql`${usersTable.role} in ('admin','manager','supervisor')`
     ));
 
   const severityLabel = severity === "out_of_service" ? "Out of Service" : severity.charAt(0).toUpperCase() + severity.slice(1);
-  for (const mgr of managers) {
+  for (const supervisor of supervisors) {
     await db.insert(userNotificationsTable).values({
-      userId: mgr.id,
+      userId: supervisor.id,
       notificationType: "defect_new",
       title: `New ${severityLabel} Defect — ${vehicle.unitNumber}`,
       body: description.slice(0, 120),
@@ -283,46 +285,54 @@ router.patch("/defects/:id", requireRole("admin", "manager", "mechanic"), async 
   if (status === "assigned" && !existing.workOrderId) {
     const [vehicle] = await db.select().from(vehiclesTable).where(eq(vehiclesTable.id, existing.vehicleId));
     if (vehicle) {
-      const woNumber = await generateWoNumber();
-      const [wo] = await db
-        .insert(workOrdersTable)
-        .values({
-          woNumber,
-          companyId: req.user!.companyId!,
-          vehicleId: existing.vehicleId,
-          workOrderType: "driver_defect" as any,
-          status: "assigned" as any,
-          priority: existing.severity === "out_of_service" ? "critical" : existing.severity === "major" ? "high" : "normal" as any,
-          createdByUserId: req.user!.id,
-          description: existing.description,
-          internalNotes: `Auto-created from defect DEF-${String(id).padStart(4, "0")}`,
-        })
-        .returning();
+      try {
+        const woNumber = await generateWoNumber();
+        const [wo] = await db
+          .insert(workOrdersTable)
+          .values({
+            woNumber,
+            companyId: req.user!.companyId!,
+            vehicleId: existing.vehicleId,
+            workOrderType: "driver_defect" as any,
+            status: "assigned" as any,
+            priority: existing.severity === "out_of_service" ? "critical" : existing.severity === "major" ? "high" : "normal" as any,
+            createdByUserId: req.user!.id,
+            description: existing.description,
+            internalNotes: `Auto-created from defect DEF-${String(id).padStart(4, "0")}`,
+          })
+          .returning();
 
-      await db.insert(workOrderStatusHistoryTable).values({
-        workOrderId: wo.id,
-        fromStatus: null,
-        toStatus: "assigned",
-        changedByUserId: req.user!.id,
-        notes: `Created from defect DEF-${String(id).padStart(4, "0")}`,
-      });
+        await db.insert(workOrderStatusHistoryTable).values({
+          workOrderId: wo.id,
+          fromStatus: null,
+          toStatus: "assigned",
+          changedByUserId: req.user!.id,
+          notes: `Created from defect DEF-${String(id).padStart(4, "0")}`,
+        });
 
-      await db.insert(auditLogTable).values({
-        tableName: "work_orders",
-        recordId: wo.id,
-        action: "create",
-        changedByUserId: req.user!.id,
-        changedByName: req.user!.name,
-        newValue: JSON.stringify({ woNumber, vehicleId: existing.vehicleId, workOrderType: "driver_defect", status: "assigned" }),
-      });
+        await db.insert(auditLogTable).values({
+          tableName: "work_orders",
+          recordId: wo.id,
+          action: "create",
+          changedByUserId: req.user!.id,
+          changedByName: req.user!.name,
+          newValue: JSON.stringify({ woNumber, vehicleId: existing.vehicleId, workOrderType: "driver_defect", status: "assigned" }),
+        });
 
-      // Update vehicle status to in_repair if available
-      if (vehicle.status === "available") {
-        await db.update(vehiclesTable).set({ status: "in_repair", updatedAt: now }).where(eq(vehiclesTable.id, existing.vehicleId));
+        // Update vehicle status to in_repair if available
+        if (vehicle.status === "available") {
+          await db.update(vehiclesTable).set({ status: "in_repair", updatedAt: now }).where(eq(vehiclesTable.id, existing.vehicleId));
+        }
+
+        updates.workOrderId = wo.id;
+        autoCreatedWo = { id: wo.id, woNumber };
+      } catch (error: any) {
+        if (error.code === '23505') {
+          req.log.warn({ err: error }, "Work order sequence collision, retrying with higher number");
+        } else {
+          req.log.error({ err: error }, "Failed to auto-create work order");
+        }
       }
-
-      updates.workOrderId = wo.id;
-      autoCreatedWo = { id: wo.id, woNumber };
     }
   }
 

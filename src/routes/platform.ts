@@ -5,6 +5,7 @@ import { z } from "zod/v4";
 import { db } from "@workspace/db";
 import { companiesTable, usersTable } from "@workspace/db/schema";
 import { requirePlatformAdmin } from "../middlewares/auth.js";
+import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 const companyIdParams = z.object({ id: z.coerce.number().int().positive() });
@@ -126,12 +127,23 @@ router.post("/platform/companies/:id/users", requirePlatformAdmin, async (req, r
     res.status(409).json({ error: "User email already exists" });
     return;
   }
-  const [user] = await db.insert(usersTable).values({
-    name: parsed.data.name, email: parsed.data.email, role: parsed.data.role,
-    phone: parsed.data.phone ?? null, companyId: params.data.id,
-    passwordHash: await bcrypt.hash(parsed.data.password, 12),
-  }).returning();
-  res.status(201).json(publicUser(user));
+  try {
+    const [user] = await db.insert(usersTable).values({
+      name: parsed.data.name, email: parsed.data.email, role: parsed.data.role,
+      phone: parsed.data.phone ?? null, companyId: params.data.id,
+      passwordHash: await bcrypt.hash(parsed.data.password, 12),
+    }).returning();
+    logger.info({ userId: user.id, email: user.email, role: user.role, companyId: params.data.id }, "User created (audit)");
+    res.status(201).json(publicUser(user));
+  } catch (error: any) {
+    if (error.code === '23505') {
+      logger.warn({ email: parsed.data.email, companyId: params.data.id }, "User creation failed: duplicate email");
+      res.status(409).json({ error: "User email already exists" });
+      return;
+    }
+    logger.error({ error, email: parsed.data.email, companyId: params.data.id }, "User creation error");
+    throw error;
+  }
 });
 
 router.patch("/platform/companies/:id", requirePlatformAdmin, async (req, res): Promise<void> => {
@@ -153,6 +165,7 @@ router.patch("/platform/companies/:id", requirePlatformAdmin, async (req, res): 
     res.status(404).json({ error: "Company not found" });
     return;
   }
+  logger.info({ companyId: params.data.id, active: parsed.data.active }, "Company status updated (audit)");
   res.json(company);
 });
 

@@ -9,3 +9,4 @@ export * from "./defects";
 export * from "./compliance";
 export * from "./audit";
 export * from "./notifications";
+export * from "./invoices";

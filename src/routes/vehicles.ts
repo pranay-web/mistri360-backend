@@ -132,29 +132,46 @@ router.post("/vehicles", requireAuth, requireRole("admin", "manager"), async (re
     return;
   }
 
-  const [vehicle] = await db
-    .insert(vehiclesTable)
-    .values({
-      ...parsed.data,
-      currentOdometer: parsed.data.currentOdometer ?? 0,
-      companyId: req.user!.companyId!,
-    })
-    .returning();
+  try {
+    const [vehicle] = await db
+      .insert(vehiclesTable)
+      .values({
+        ...parsed.data,
+        currentOdometer: parsed.data.currentOdometer ?? 0,
+        companyId: req.user!.companyId!,
+      })
+      .returning();
 
-  // Log audit
-  await db.insert(auditLogTable).values({
-    tableName: "vehicles",
-    recordId: vehicle.id,
-    action: "create",
-    changedByUserId: req.user!.id,
-    changedByName: req.user!.name,
-    metadata: { unitNumber: vehicle.unitNumber },
-  });
+    // Log audit
+    await db.insert(auditLogTable).values({
+      tableName: "vehicles",
+      recordId: vehicle.id,
+      action: "create",
+      changedByUserId: req.user!.id,
+      changedByName: req.user!.name,
+      metadata: { unitNumber: vehicle.unitNumber },
+    });
 
-  // Initial PM check
-  await checkVehiclePmReminders(vehicle.id);
+    // Initial PM check
+    await checkVehiclePmReminders(vehicle.id);
 
-  res.status(201).json(vehicle);
+    res.status(201).json(vehicle);
+  } catch (error: any) {
+    if (error.code === '23505') {
+      if (error.detail?.includes('unitNumber')) {
+        res.status(409).json({ error: "Vehicle unit number already exists" });
+      } else if (error.detail?.includes('vin')) {
+        res.status(409).json({ error: "Vehicle VIN already in use" });
+      } else if (error.detail?.includes('licensePlate')) {
+        res.status(409).json({ error: "License plate already registered" });
+      } else {
+        res.status(409).json({ error: "Vehicle already exists with this information" });
+      }
+      return;
+    }
+    req.log.error({ err: error }, "Error creating vehicle");
+    res.status(500).json({ error: "Failed to create vehicle" });
+  }
 });
 
 // ── GET /vehicles/:id ────────────────────────────────────────────────────────
@@ -204,32 +221,57 @@ router.patch("/vehicles/:id", requireAuth, requireRole("admin", "manager"), asyn
     return;
   }
 
-  const [updated] = await db
-    .update(vehiclesTable)
-    .set({ ...parsed.data, updatedAt: new Date() })
-    .where(and(eq(vehiclesTable.id, params.data.id), eq(vehiclesTable.companyId, req.user!.companyId!)))
-    .returning();
-
-  // Audit changed fields
-  for (const [field, newVal] of Object.entries(parsed.data)) {
-    const oldVal = existing[field as keyof typeof existing];
-    if (String(oldVal) !== String(newVal)) {
-      await db.insert(auditLogTable).values({
-        tableName: "vehicles",
-        recordId: updated.id,
-        action: "update",
-        changedByUserId: req.user!.id,
-        changedByName: req.user!.name,
-        fieldName: field,
-        oldValue: String(oldVal ?? ""),
-        newValue: String(newVal ?? ""),
-      });
+  // Validate odometer never decreases (prevent rollback vulnerability)
+  if (parsed.data.currentOdometer !== undefined && parsed.data.currentOdometer !== null) {
+    if (parsed.data.currentOdometer < existing.currentOdometer) {
+      res.status(422).json({ error: `Odometer cannot decrease. Current: ${existing.currentOdometer}km, Attempted: ${parsed.data.currentOdometer}km` });
+      return;
     }
   }
 
-  await checkVehiclePmReminders(updated.id);
+  try {
+    const [updated] = await db
+      .update(vehiclesTable)
+      .set({ ...parsed.data, updatedAt: new Date() })
+      .where(and(eq(vehiclesTable.id, params.data.id), eq(vehiclesTable.companyId, req.user!.companyId!)))
+      .returning();
 
-  res.json(updated);
+    // Audit changed fields
+    for (const [field, newVal] of Object.entries(parsed.data)) {
+      const oldVal = existing[field as keyof typeof existing];
+      if (String(oldVal) !== String(newVal)) {
+        await db.insert(auditLogTable).values({
+          tableName: "vehicles",
+          recordId: updated.id,
+          action: "update",
+          changedByUserId: req.user!.id,
+          changedByName: req.user!.name,
+          fieldName: field,
+          oldValue: String(oldVal ?? ""),
+          newValue: String(newVal ?? ""),
+        });
+      }
+    }
+
+    await checkVehiclePmReminders(updated.id);
+
+    res.json(updated);
+  } catch (error: any) {
+    if (error.code === '23505') {
+      if (error.detail?.includes('unitNumber')) {
+        res.status(409).json({ error: "Vehicle unit number already exists" });
+      } else if (error.detail?.includes('vin')) {
+        res.status(409).json({ error: "Vehicle VIN already in use" });
+      } else if (error.detail?.includes('licensePlate')) {
+        res.status(409).json({ error: "License plate already registered" });
+      } else {
+        res.status(409).json({ error: "Vehicle already exists with this information" });
+      }
+      return;
+    }
+    req.log.error({ err: error }, "Error updating vehicle");
+    res.status(500).json({ error: "Failed to update vehicle" });
+  }
 });
 
 // ── DELETE /vehicles/:id ─────────────────────────────────────────────────────
@@ -241,17 +283,44 @@ router.delete("/vehicles/:id", requireAuth, requireRole("admin"), async (req, re
     return;
   }
 
-  const [deleted] = await db
-    .delete(vehiclesTable)
-    .where(and(eq(vehiclesTable.id, params.data.id), eq(vehiclesTable.companyId, req.user!.companyId!)))
-    .returning({ id: vehiclesTable.id });
+  const [existing] = await db
+    .select()
+    .from(vehiclesTable)
+    .where(and(eq(vehiclesTable.id, params.data.id), eq(vehiclesTable.companyId, req.user!.companyId!)));
 
-  if (!deleted) {
+  if (!existing) {
     res.status(404).json({ error: "Vehicle not found" });
     return;
   }
 
-  res.sendStatus(204);
+  try {
+    // Soft delete: mark as inactive instead of hard delete to preserve foreign key references
+    const [updated] = await db
+      .update(vehiclesTable)
+      .set({ status: "inactive", updatedAt: new Date() })
+      .where(eq(vehiclesTable.id, params.data.id))
+      .returning();
+
+    await db.insert(auditLogTable).values({
+      tableName: "vehicles",
+      recordId: params.data.id,
+      action: "delete",
+      changedByUserId: req.user!.id,
+      changedByName: req.user!.name,
+      metadata: { softDelete: true, reason: "Vehicle deactivated" } as any,
+    });
+
+    res.json({ success: true, message: "Vehicle deactivated and archived" });
+  } catch (error: any) {
+    if (error.code === '23503') {
+      res.status(409).json({
+        error: "Cannot delete vehicle with active maintenance records. Vehicle has been deactivated instead."
+      });
+      return;
+    }
+    req.log.error({ err: error }, "Error deleting vehicle");
+    res.status(500).json({ error: "Failed to delete vehicle" });
+  }
 });
 
 // ── PATCH /vehicles/:id/status ───────────────────────────────────────────────

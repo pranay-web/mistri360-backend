@@ -164,7 +164,7 @@ router.get("/dashboard/summary-extended", requireAuth, async (req, res): Promise
         and(
           eq(workOrdersTable.companyId, req.user!.companyId!),
           gte(workOrdersTable.createdAt, new Date(monthStart)),
-          eq(workOrdersTable.status, "completed")
+          sql`${workOrdersTable.status} IN ('completed', 'released')`
         )
       ),
   ]);

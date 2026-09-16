@@ -1,5 +1,10 @@
 import type { Request, Response, NextFunction } from "express";
-import { SESSION_COOKIE, getSessionUser } from "../lib/session.js";
+import { db } from "@workspace/db";
+import { companiesTable, usersTable } from "@workspace/db/schema";
+import { eq } from "drizzle-orm";
+import { verifyToken } from "../lib/jwt.js";
+
+const JWT_COOKIE = "fleet_token";
 
 export type AuthenticatedUser = {
   id: number;
@@ -27,16 +32,45 @@ export async function requireAuth(
   res: Response,
   next: NextFunction
 ) {
-  const sessionId = req.cookies?.[SESSION_COOKIE] as string | undefined;
-  if (!sessionId) {
+  const token = req.cookies?.[JWT_COOKIE] as string | undefined;
+  if (!token) {
     res.status(401).json({ error: "Unauthenticated" });
     return;
   }
 
-  const user = await getSessionUser(sessionId);
-  if (!user) {
-    res.clearCookie(SESSION_COOKIE);
-    res.status(401).json({ error: "Session expired or invalid" });
+  const payload = verifyToken(token);
+  if (!payload) {
+    res.clearCookie(JWT_COOKIE);
+    res.status(401).json({ error: "Invalid or expired token" });
+    return;
+  }
+
+  const users = await db
+    .select({
+      id: usersTable.id,
+      name: usersTable.name,
+      email: usersTable.email,
+      role: usersTable.role,
+      phone: usersTable.phone,
+      active: usersTable.active,
+      companyId: usersTable.companyId,
+      companyName: companiesTable.name,
+      companySlug: companiesTable.slug,
+      companyActive: companiesTable.active,
+    })
+    .from(usersTable)
+    .leftJoin(companiesTable, eq(usersTable.companyId, companiesTable.id))
+    .where(eq(usersTable.id, payload.userId))
+    .limit(1);
+
+  const user = users[0];
+  if (!user || !user.active) {
+    res.status(401).json({ error: "User not found or inactive" });
+    return;
+  }
+
+  if (user.role !== "platform_admin" && (!user.companyId || !user.companyActive)) {
+    res.status(401).json({ error: "Company access is inactive" });
     return;
   }
 

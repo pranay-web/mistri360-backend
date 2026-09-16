@@ -45,5 +45,22 @@ export const estimateLineItemsTable = pgTable("estimate_line_items", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const estimateEmailStatusEnum = pgEnum("estimate_email_status", ["sent", "failed"]);
+
+export const estimateEmailsTable = pgTable("estimate_emails", {
+  id: serial("id").primaryKey(),
+  estimateId: integer("estimate_id").notNull().references(() => estimatesTable.id, { onDelete: "cascade" }),
+  sentToEmail: text("sent_to_email").notNull(),
+  ccEmails: text("cc_emails"),
+  subject: text("subject").notNull(),
+  message: text("message"),
+  sentByUserId: integer("sent_by_user_id").notNull(),
+  status: estimateEmailStatusEnum("status").notNull().default("sent"),
+  errorMessage: text("error_message"),
+  providerMessageId: text("provider_message_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type Estimate = typeof estimatesTable.$inferSelect;
 export type EstimateLineItem = typeof estimateLineItemsTable.$inferSelect;
+export type EstimateEmail = typeof estimateEmailsTable.$inferSelect;

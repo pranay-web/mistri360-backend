@@ -1,12 +1,13 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import {
-  customersTable, estimatesTable, estimateLineItemsTable, vehiclesTable, workOrdersTable,
+  customersTable, estimatesTable, estimateLineItemsTable, vehiclesTable, workOrdersTable, estimateEmailsTable, usersTable,
 } from "@workspace/db/schema";
 import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 import { requireAuth, requireRole } from "../middlewares/auth.js";
-import { generateEstimatePdf } from "../lib/pdf-generator.js";
+import { generateEstimatePdf, generateEstimatePdfAsBuffer } from "../lib/pdf-generator.js";
+import { sendEmail } from "../lib/emailService.js";
 
 const router: IRouter = Router();
 const roles = requireRole("admin", "manager");
@@ -79,6 +80,14 @@ async function recalculate(id: number, executor: any = db) {
 }
 
 router.get("/estimates", requireAuth, roles, async (req, res): Promise<void> => {
+  const emailSubquery = db.select({
+    estimateId: estimateEmailsTable.estimateId,
+    emailCount: sql<number>`count(*)::int`.as("email_count"),
+    lastEmailSentAt: sql<string>`max(${estimateEmailsTable.createdAt})`.as("last_email_sent_at"),
+  }).from(estimateEmailsTable)
+    .groupBy(estimateEmailsTable.estimateId)
+    .as("email_stats");
+
   const rows = await db.select({
     id: estimatesTable.id, estimateNumber: estimatesTable.estimateNumber,
     title: estimatesTable.title, status: estimatesTable.status,
@@ -87,9 +96,12 @@ router.get("/estimates", requireAuth, roles, async (req, res): Promise<void> => 
     vehicleDescription: estimatesTable.vehicleDescription, validUntil: estimatesTable.validUntil,
     subtotal: estimatesTable.subtotal, taxAmount: estimatesTable.taxAmount, total: estimatesTable.total,
     convertedWorkOrderId: estimatesTable.convertedWorkOrderId, createdAt: estimatesTable.createdAt,
+    emailCount: sql<number>`COALESCE(${emailSubquery.emailCount}, 0)`,
+    lastEmailSentAt: emailSubquery.lastEmailSentAt,
   }).from(estimatesTable)
     .innerJoin(customersTable, eq(estimatesTable.customerId, customersTable.id))
     .leftJoin(vehiclesTable, eq(estimatesTable.vehicleId, vehiclesTable.id))
+    .leftJoin(emailSubquery, eq(estimatesTable.id, emailSubquery.estimateId))
     .where(eq(estimatesTable.companyId, req.user!.companyId!))
     .orderBy(desc(estimatesTable.createdAt));
   res.json(rows);
@@ -116,11 +128,11 @@ router.post("/estimates", requireAuth, roles, async (req, res): Promise<void> =>
       .where(and(eq(estimatesTable.companyId, companyId), sql`EXTRACT(YEAR FROM ${estimatesTable.createdAt}) = ${year}`));
     const estimateNumber = `EST-${year}-${String(Number(row?.maxSeq ?? 0) + 1).padStart(4, "0")}`;
     const [record] = await tx.insert(estimatesTable).values({
-      companyId, estimateNumber, customerId: parsed.data.customerId,
-      vehicleId: parsed.data.vehicleId ?? null, vehicleDescription: parsed.data.vehicleDescription ?? null,
-      title: parsed.data.title, validUntil: parsed.data.validUntil ? new Date(`${parsed.data.validUntil}T23:59:59`) : null,
-      notes: parsed.data.notes ?? null, terms: parsed.data.terms ?? null,
-      taxRate: Number(parsed.data.taxRate ?? 13).toFixed(3), createdByUserId: req.user!.id,
+      companyId, customerId: parsed.data.customerId, vehicleId: parsed.data.vehicleId ?? null,
+      vehicleDescription: parsed.data.vehicleDescription ?? null, estimateNumber,
+      title: parsed.data.title, status: "draft", validUntil: parsed.data.validUntil ? new Date(parsed.data.validUntil) : null,
+      notes: parsed.data.notes ?? null, terms: parsed.data.terms ?? null, taxRate: String(parsed.data.taxRate ?? 13),
+      createdByUserId: req.user!.id,
     }).returning({ id: estimatesTable.id });
     return record;
   });
@@ -133,59 +145,62 @@ router.get("/estimates/:id", requireAuth, roles, async (req, res): Promise<void>
   res.json(detail);
 });
 
-router.patch("/estimates/:id", requireAuth, roles, async (req, res): Promise<void> => {
+router.put("/estimates/:id", requireAuth, roles, async (req, res): Promise<void> => {
   const id = Number(req.params.id);
-  const parsed = estimateInput.partial().safeParse(req.body);
+  const parsed = estimateInput.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
   const existing = await loadEstimate(id, req.user!.companyId!);
   if (!existing) { res.status(404).json({ error: "Estimate not found" }); return; }
-  if (!parsed.success || existing.status !== "draft") {
-    res.status(400).json({ error: !parsed.success ? "Invalid estimate update" : "Only draft estimates can be edited" }); return;
-  }
-  if (parsed.data.customerId !== undefined) {
-    const [customer] = await db.select({ id: customersTable.id }).from(customersTable).where(and(
-      eq(customersTable.id, parsed.data.customerId),
-      eq(customersTable.companyId, req.user!.companyId!),
-      eq(customersTable.active, true),
-    ));
-    if (!customer) { res.status(400).json({ error: "Active customer not found" }); return; }
-  }
-  if (parsed.data.vehicleId) {
-    const [vehicle] = await db.select({ id: vehiclesTable.id }).from(vehiclesTable).where(and(
-      eq(vehiclesTable.id, parsed.data.vehicleId),
-      eq(vehiclesTable.companyId, req.user!.companyId!),
-    ));
-    if (!vehicle) { res.status(400).json({ error: "Vehicle not found" }); return; }
-  }
-  const changed = await db.transaction(async (tx) => {
+  if (existing.status !== "draft") { res.status(400).json({ error: "Only draft estimates can be edited" }); return; }
+  const updated = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(765432, ${id})`);
     const [current] = await tx.select({ id: estimatesTable.id }).from(estimatesTable).where(and(
       eq(estimatesTable.id, id), eq(estimatesTable.companyId, req.user!.companyId!), eq(estimatesTable.status, "draft"),
     ));
-    if (!current) return false;
+    if (!current) return null;
     await tx.update(estimatesTable).set({
-      ...parsed.data,
-      taxRate: parsed.data.taxRate === undefined ? undefined : Number(parsed.data.taxRate).toFixed(3),
-      validUntil: parsed.data.validUntil === undefined ? undefined : parsed.data.validUntil ? new Date(`${parsed.data.validUntil}T23:59:59`) : null,
+      title: parsed.data.title, customerId: parsed.data.customerId, vehicleId: parsed.data.vehicleId ?? null,
+      vehicleDescription: parsed.data.vehicleDescription ?? null, validUntil: parsed.data.validUntil ? new Date(parsed.data.validUntil) : null,
+      notes: parsed.data.notes ?? null, terms: parsed.data.terms ?? null, taxRate: String(parsed.data.taxRate ?? 13),
       updatedAt: new Date(),
     } as any).where(and(eq(estimatesTable.id, id), eq(estimatesTable.companyId, req.user!.companyId!), eq(estimatesTable.status, "draft")));
     await recalculate(id, tx);
     return true;
   });
-  if (!changed) { res.status(409).json({ error: "Estimate is no longer editable" }); return; }
+  if (!updated) { res.status(409).json({ error: "Estimate is no longer editable" }); return; }
   res.json(await loadEstimate(id, req.user!.companyId!));
+});
+
+router.delete("/estimates/:id", requireAuth, roles, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const existing = await loadEstimate(id, req.user!.companyId!);
+  if (!existing) { res.status(404).json({ error: "Estimate not found" }); return; }
+  if (existing.status !== "draft") { res.status(400).json({ error: "Only draft estimates can be deleted" }); return; }
+  const deleted = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(765432, ${id})`);
+    const [current] = await tx.select({ id: estimatesTable.id }).from(estimatesTable).where(and(
+      eq(estimatesTable.id, id), eq(estimatesTable.companyId, req.user!.companyId!), eq(estimatesTable.status, "draft"),
+    ));
+    if (!current) return false;
+    await tx.delete(estimatesTable).where(and(
+      eq(estimatesTable.id, id), eq(estimatesTable.companyId, req.user!.companyId!), eq(estimatesTable.status, "draft"),
+    ));
+    return true;
+  });
+  if (!deleted) { res.status(409).json({ error: "Estimate cannot be deleted" }); return; }
+  res.status(204).end();
 });
 
 router.post("/estimates/:id/line-items", requireAuth, roles, async (req, res): Promise<void> => {
   const id = Number(req.params.id);
   const parsed = lineInput.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
   const existing = await loadEstimate(id, req.user!.companyId!);
   if (!existing) { res.status(404).json({ error: "Estimate not found" }); return; }
-  if (!parsed.success || existing.status !== "draft") {
-    res.status(400).json({ error: !parsed.success ? "Invalid line item" : "Only draft estimates can be edited" }); return;
-  }
-  const quantity = Math.round((parsed.data.quantity + Number.EPSILON) * 100) / 100;
-  const unitPriceCents = Math.round((parsed.data.unitPrice + Number.EPSILON) * 100);
-  const lineTotalCents = Math.round(quantity * unitPriceCents);
+  if (existing.status !== "draft") { res.status(400).json({ error: "Only draft estimates can be edited" }); return; }
+  const quantityCents = Math.round(parsed.data.quantity * 100);
+  const unitPriceCents = Math.round(parsed.data.unitPrice * 100);
+  const lineTotalCents = Math.round((quantityCents * unitPriceCents) / 100);
   const changed = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(765432, ${id})`);
     const [current] = await tx.select({ id: estimatesTable.id }).from(estimatesTable).where(and(
@@ -195,7 +210,7 @@ router.post("/estimates/:id/line-items", requireAuth, roles, async (req, res): P
     const [lineCount] = await tx.select({ cnt: count() }).from(estimateLineItemsTable).where(eq(estimateLineItemsTable.estimateId, id));
     await tx.insert(estimateLineItemsTable).values({
       estimateId: id, lineType: parsed.data.lineType, description: parsed.data.description,
-      quantity: quantity.toFixed(2), unitPrice: (unitPriceCents / 100).toFixed(2),
+      quantity: (quantityCents / 100).toFixed(2), unitPrice: (unitPriceCents / 100).toFixed(2),
       lineTotal: (lineTotalCents / 100).toFixed(2), sortOrder: lineCount?.cnt ?? 0,
     });
     await recalculate(id, tx);
@@ -262,15 +277,20 @@ router.post("/estimates/:id/convert", requireAuth, roles, async (req, res): Prom
   const companyId = req.user!.companyId!;
   const estimate = await loadEstimate(id, companyId);
   if (!estimate) { res.status(404).json({ error: "Estimate not found" }); return; }
-  if (estimate.status !== "approved") { res.status(400).json({ error: "Only approved estimates can be converted" }); return; }
-  if (!estimate.vehicleId) { res.status(400).json({ error: "Select a fleet vehicle before converting this estimate" }); return; }
+  if (estimate.status !== "approved") { res.status(400).json({ error: "Only approved estimates can be converted to work orders" }); return; }
+  if (estimate.convertedWorkOrderId) { res.status(409).json({ error: "Estimate has already been converted" }); return; }
+  if (!estimate.vehicleId) { res.status(400).json({ error: "A fleet vehicle must be linked before converting to a work order" }); return; }
+
   let workOrder: { id: number; woNumber: string };
   try {
     workOrder = await db.transaction(async (tx) => {
-      const [claimed] = await tx.update(estimatesTable).set({ status: "converted", updatedAt: new Date() })
-        .where(and(eq(estimatesTable.id, id), eq(estimatesTable.companyId, companyId), eq(estimatesTable.status, "approved")))
-        .returning({ id: estimatesTable.id });
-      if (!claimed) throw new Error("ESTIMATE_CONVERSION_CONFLICT");
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(765432, ${id})`);
+      const [current] = await tx.select({
+        status: estimatesTable.status, convertedWorkOrderId: estimatesTable.convertedWorkOrderId,
+      }).from(estimatesTable).where(and(eq(estimatesTable.id, id), eq(estimatesTable.companyId, companyId)));
+      if (!current || current.status !== "approved" || current.convertedWorkOrderId) {
+        throw new Error("ESTIMATE_CONVERSION_CONFLICT");
+      }
       const year = new Date().getFullYear();
       await tx.execute(sql`SELECT pg_advisory_xact_lock(${year}, 987654)`);
       const [row] = await tx.select({
@@ -284,7 +304,7 @@ router.post("/estimates/:id/convert", requireAuth, roles, async (req, res): Prom
         description, internalNotes: `Converted from estimate ${estimate.estimateNumber}`,
         createdByUserId: req.user!.id,
       }).returning({ id: workOrdersTable.id, woNumber: workOrdersTable.woNumber });
-      await tx.update(estimatesTable).set({ convertedWorkOrderId: created.id })
+      await tx.update(estimatesTable).set({ convertedWorkOrderId: created.id, status: "converted", updatedAt: new Date() })
         .where(and(eq(estimatesTable.id, id), eq(estimatesTable.companyId, companyId)));
       return created;
     });
@@ -303,5 +323,151 @@ router.get("/estimates/:id/pdf", requireAuth, roles, async (req, res): Promise<v
   if (!estimate) { res.status(404).json({ error: "Estimate not found" }); return; }
   generateEstimatePdf(estimate, res, req.user!.companyName ?? "Company Workspace");
 });
+
+router.post("/estimates/:id/send-email", requireAuth, roles, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const { to, cc, message } = req.body ?? {};
+  const companyId = req.user!.companyId!;
+  const estimate = await loadEstimate(id, companyId);
+  if (!estimate) { res.status(404).json({ error: "Estimate not found" }); return; }
+
+  const recipientEmail = (to || estimate.customerEmail || "").trim();
+  if (!recipientEmail) {
+    res.status(400).json({ error: "No email address found. Add customer email or specify recipient." });
+    return;
+  }
+
+  // Generate the PDF buffer
+  let pdfBuffer: Buffer;
+  try {
+    pdfBuffer = await generateEstimatePdfAsBuffer(estimate, req.user!.companyName ?? "Company Workspace");
+  } catch (err: any) {
+    res.status(500).json({ error: `Failed to generate PDF: ${err.message}` });
+    return;
+  }
+
+  const htmlBody = buildEstimateEmailHtml(estimate, message);
+  const emailResult = await sendEmail({
+    to: recipientEmail,
+    cc: cc ? cc.split(",").map((e: string) => e.trim()).filter(Boolean) : [],
+    subject: `Estimate ${estimate.estimateNumber}: ${estimate.title}`,
+    htmlBody,
+    attachment: {
+      filename: `${estimate.estimateNumber}.pdf`,
+      content: pdfBuffer,
+      contentType: "application/pdf",
+    },
+  });
+
+  // Execute in transaction with advisory lock and tenancy scoping
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(765432, ${id})`);
+
+    const [current] = await tx.select({
+      id: estimatesTable.id,
+      status: estimatesTable.status,
+    }).from(estimatesTable).where(and(eq(estimatesTable.id, id), eq(estimatesTable.companyId, companyId)));
+
+    if (!current) throw new Error("ESTIMATE_NOT_FOUND");
+
+    // Insert audit record of email send attempt
+    await tx.insert(estimateEmailsTable).values({
+      estimateId: id,
+      sentToEmail: recipientEmail,
+      ccEmails: cc ? cc.trim() : null,
+      subject: `Estimate ${estimate.estimateNumber}: ${estimate.title}`,
+      message: message ? message.trim() : null,
+      sentByUserId: req.user!.id,
+      status: emailResult.success ? "sent" : "failed",
+      errorMessage: emailResult.error ?? null,
+      providerMessageId: emailResult.messageId ?? null,
+    });
+
+    // If estimate is in draft, check line items and transition to sent
+    if (current.status === "draft") {
+      const [lineCount] = await tx.select({ cnt: count() }).from(estimateLineItemsTable).where(eq(estimateLineItemsTable.estimateId, id));
+      if (!lineCount?.cnt) {
+        throw new Error("EMPTY_ESTIMATE_CANNOT_SEND");
+      }
+      await tx.update(estimatesTable).set({
+        status: "sent",
+        sentAt: new Date(),
+        updatedAt: new Date(),
+      }).where(and(eq(estimatesTable.id, id), eq(estimatesTable.companyId, companyId)));
+    }
+  }).catch((err) => {
+    if (err.message === "EMPTY_ESTIMATE_CANNOT_SEND") {
+      res.status(400).json({ error: "Cannot send estimate with no line items" });
+      return "HANDLED";
+    }
+    throw err;
+  });
+
+  if (res.headersSent) return;
+
+  res.json({
+    success: emailResult.success,
+    messageId: emailResult.messageId,
+    error: emailResult.error,
+  });
+});
+
+router.get("/estimates/:id/emails", requireAuth, roles, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const companyId = req.user!.companyId!;
+
+  // Scoped through parent estimate companyId
+  const estimate = await loadEstimate(id, companyId);
+  if (!estimate) { res.status(404).json({ error: "Estimate not found" }); return; }
+
+  const rows = await db.select({
+    id: estimateEmailsTable.id,
+    estimateId: estimateEmailsTable.estimateId,
+    sentToEmail: estimateEmailsTable.sentToEmail,
+    ccEmails: estimateEmailsTable.ccEmails,
+    subject: estimateEmailsTable.subject,
+    message: estimateEmailsTable.message,
+    sentByUserId: estimateEmailsTable.sentByUserId,
+    sentByName: usersTable.name,
+    status: estimateEmailsTable.status,
+    errorMessage: estimateEmailsTable.errorMessage,
+    providerMessageId: estimateEmailsTable.providerMessageId,
+    createdAt: estimateEmailsTable.createdAt,
+  }).from(estimateEmailsTable)
+    .innerJoin(estimatesTable, and(eq(estimateEmailsTable.estimateId, estimatesTable.id), eq(estimatesTable.companyId, companyId)))
+    .innerJoin(usersTable, eq(estimateEmailsTable.sentByUserId, usersTable.id))
+    .where(eq(estimateEmailsTable.estimateId, id))
+    .orderBy(desc(estimateEmailsTable.createdAt));
+
+  res.json(rows);
+});
+
+function buildEstimateEmailHtml(estimate: any, customMessage?: string): string {
+  return `
+    <html>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #334155;">
+        <table width="100%" style="max-width: 600px; margin: 0 auto;">
+          <tr><td style="padding: 20px; background: #0A1628; color: white; text-align: center;">
+            <h1 style="margin: 0; font-size: 28px;">Estimate ${estimate.estimateNumber}</h1>
+          </td></tr>
+          <tr><td style="padding: 20px; border: 1px solid #DCE3EA;">
+            <p>Hello ${estimate.contactName || "there"},</p>
+            <p>We've prepared an estimate for your fleet maintenance service.</p>
+            <table width="100%" style="margin: 20px 0; border-collapse: collapse;">
+              <tr><td style="padding: 10px 0; border-bottom: 1px solid #DCE3EA;"><strong>Description:</strong></td><td style="padding: 10px 20px; text-align: right;">${estimate.title}</td></tr>
+              <tr><td style="padding: 10px 0;"><strong>Total Amount:</strong></td><td style="padding: 10px 20px; text-align: right; font-weight: bold; font-size: 18px;">$${Number(estimate.total).toLocaleString("en-CA", { minimumFractionDigits: 2 })}</td></tr>
+            </table>
+            ${customMessage ? `<p><em>${customMessage}</em></p>` : ""}
+            <p>Please see the attached PDF for full details.</p>
+            <p>Thank you for your business!</p>
+          </td></tr>
+          <tr><td style="padding: 20px; background: #F3F4F6; text-align: center; font-size: 12px; color: #6B7280;">
+            mistri360 Fleet Maintenance
+          </td></tr>
+        </table>
+      </body>
+    </html>
+  `;
+}
 
 export default router;

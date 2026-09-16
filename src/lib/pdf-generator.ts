@@ -557,17 +557,232 @@ interface EstimatePdfData {
 
 export function generateEstimatePdf(data: EstimatePdfData, res: Response, companyName = "Company Workspace") {
   const doc = new PDFDocument({ margin: 44, size: "LETTER", bufferPages: true });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${data.estimateNumber}.pdf"`);
+  doc.pipe(res);
+  generateEstimatePdfContent(doc, data, companyName);
+  doc.end();
+}
+
+export interface InvoicePdfData {
+  invoiceNumber: string;
+  customerId: number;
+  customerName: string;
+  customerCode?: string | null;
+  contactName?: string | null;
+  customerEmail?: string | null;
+  customerPhone?: string | null;
+  customerAddress?: string | null;
+  customerCity?: string | null;
+  customerProvince?: string | null;
+  customerPostalCode?: string | null;
+  vehicleUnitNumber?: string | null;
+  vehicleDescription?: string | null;
+  issueDate: string | Date;
+  dueDate: string | Date;
+  status: string;
+  notes?: string | null;
+  terms?: string | null;
+  taxRate: string;
+  subtotal: string;
+  taxAmount: string;
+  total: string;
+  amountPaid: string;
+  paidAt?: string | Date | null;
+  paymentMethod?: string | null;
+  createdAt: string | Date;
+  lineItems: Array<{
+    lineType: string;
+    description: string;
+    quantity: string;
+    unitPrice: string;
+    lineTotal: string;
+  }>;
+}
+
+export function generateInvoicePdf(data: InvoicePdfData, res: Response, companyName = "Company Workspace") {
+  const doc = new PDFDocument({ margin: 44, size: "LETTER", bufferPages: true });
   const W = doc.page.width - 88;
   const navy = "#0A1628";
   const gold = "#D89B2B";
   const slate = "#334155";
   const muted = "#64748B";
   const border = "#DCE3EA";
+  const green = "#15803D";
+  const red = "#B91C1C";
+  const yellow = "#A16207";
   let y = 44;
 
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `attachment; filename="${data.estimateNumber}.pdf"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${data.invoiceNumber}.pdf"`);
   doc.pipe(res);
+
+  const pageBreak = (height: number) => {
+    if (y + height > doc.page.height - 64) {
+      doc.addPage();
+      y = 48;
+    }
+  };
+
+  drawProductBrand(doc, 44, 49, 142);
+  doc.fillColor(slate).font("Helvetica-Bold").fontSize(9).text(companyName, 0, 55, { align: "right" });
+  doc.fillColor(muted).font("Helvetica").fontSize(7).text("PROFESSIONAL INVOICE", 0, 72, { align: "right" });
+
+  y = 108;
+  doc.fillColor("#0F172A").font("Helvetica-Bold").fontSize(23).text("INVOICE", 44, y);
+  doc.fillColor(navy).fontSize(13).text(data.invoiceNumber, 0, y + 3, { align: "right" });
+  y += 38;
+
+  const pillWidth = 88;
+  const statusColors: Record<string, string> = {
+    draft: "#64748B",
+    sent: "#2563EB",
+    paid: green,
+    overdue: red,
+    void: "#A3A3A3",
+  };
+  doc.roundedRect(44, y, pillWidth, 20, 3).fill(statusColors[data.status] ?? muted);
+  doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(8)
+    .text(statusLabel(data.status).toUpperCase(), 44, y + 6, { width: pillWidth, align: "center" });
+  doc.fillColor(muted).font("Helvetica").fontSize(8)
+    .text(`Issued ${fmt(data.issueDate)}   •   Due ${fmt(data.dueDate)}`, 150, y + 6, { width: W - 106, align: "right" });
+  y += 38;
+
+  const boxW = (W - 14) / 2;
+  doc.roundedRect(44, y, boxW, 112, 4).fillAndStroke("#F8FAFC", border);
+  doc.fillColor(muted).font("Helvetica-Bold").fontSize(7).text("BILL TO", 56, y + 13);
+  doc.fillColor(navy).fontSize(12).text(data.customerName, 56, y + 29, { width: boxW - 24 });
+  const customerLines = [
+    data.contactName,
+    data.customerAddress,
+    [data.customerCity, data.customerProvince, data.customerPostalCode].filter(Boolean).join(", "),
+    data.customerEmail,
+    data.customerPhone,
+  ].filter(Boolean) as string[];
+  doc.fillColor(muted).font("Helvetica").fontSize(8).text(customerLines.join("\n"), 56, y + 49, { width: boxW - 24, lineGap: 2 });
+
+  const rightX = 44 + boxW + 14;
+  doc.roundedRect(rightX, y, boxW, 112, 4).fillAndStroke("#F8FAFC", border);
+  doc.fillColor(muted).font("Helvetica-Bold").fontSize(7).text("INVOICE DETAILS", rightX + 12, y + 13);
+  doc.fillColor(navy).fontSize(11).text(data.invoiceNumber, rightX + 12, y + 29, { width: boxW - 24 });
+  doc.fillColor(muted).font("Helvetica").fontSize(8)
+    .text("Vehicle", rightX + 12, y + 60)
+    .fillColor(slate).font("Helvetica-Bold")
+    .text(data.vehicleUnitNumber ?? data.vehicleDescription ?? "Customer vehicle", rightX + 72, y + 60, { width: boxW - 84 });
+  y += 132;
+
+  pageBreak(90);
+  doc.rect(44, y, W, 22).fill("#E8EDF5");
+  const cols = [W * 0.12, W * 0.48, W * 0.11, W * 0.14, W * 0.15];
+  const xs = [44, 44 + cols[0], 44 + cols[0] + cols[1], 44 + cols[0] + cols[1] + cols[2], 44 + cols[0] + cols[1] + cols[2] + cols[3]];
+  ["Type", "Description", "Qty", "Unit Price", "Amount"].forEach((heading, index) => {
+    doc.fillColor(slate).font("Helvetica-Bold").fontSize(7.5)
+      .text(heading.toUpperCase(), xs[index] + 6, y + 7, { width: cols[index] - 12, align: index >= 2 ? "right" : "left" });
+  });
+  y += 24;
+
+  if (data.lineItems.length === 0) {
+    doc.rect(44, y, W, 42).fill("#FFFFFF").strokeColor(border).stroke();
+    doc.fillColor(muted).font("Helvetica").fontSize(9).text("No invoice line items have been added.", 56, y + 16);
+    y += 48;
+  } else {
+    data.lineItems.forEach((line, index) => {
+      const descriptionHeight = doc.heightOfString(line.description, { width: cols[1] - 12, lineGap: 1 });
+      const rowHeight = Math.max(28, descriptionHeight + 14);
+      pageBreak(rowHeight + 4);
+      doc.rect(44, y, W, rowHeight).fill(index % 2 ? "#F8FAFC" : "#FFFFFF").strokeColor(border).lineWidth(0.35).stroke();
+      const values = [
+        statusLabel(line.lineType),
+        line.description,
+        Number(line.quantity).toLocaleString("en-CA", { maximumFractionDigits: 2 }),
+        `$${Number(line.unitPrice).toLocaleString("en-CA", { minimumFractionDigits: 2 })}`,
+        `$${Number(line.lineTotal).toLocaleString("en-CA", { minimumFractionDigits: 2 })}`,
+      ];
+      values.forEach((value, column) => {
+        doc.fillColor(column === 4 ? navy : slate).font(column === 4 ? "Helvetica-Bold" : "Helvetica").fontSize(8.5)
+          .text(value, xs[column] + 6, y + 8, { width: cols[column] - 12, align: column >= 2 ? "right" : "left", lineGap: 1 });
+      });
+      y += rowHeight;
+    });
+  }
+
+  pageBreak(140);
+  const totalsX = 44 + W * 0.58;
+  y += 10;
+  [["Subtotal", data.subtotal], [`Tax (${Number(data.taxRate).toFixed(2)}%)`, data.taxAmount]].forEach(([label, value]) => {
+    doc.fillColor(muted).font("Helvetica").fontSize(9).text(label, totalsX, y, { width: W * 0.2 });
+    doc.fillColor(slate).font("Helvetica-Bold").text(`$${Number(value).toLocaleString("en-CA", { minimumFractionDigits: 2 })}`, totalsX + W * 0.2, y, { width: W * 0.22, align: "right" });
+    y += 22;
+  });
+  doc.moveTo(totalsX, y).lineTo(44 + W, y).strokeColor(navy).lineWidth(1.2).stroke();
+  y += 10;
+  doc.fillColor(navy).font("Helvetica-Bold").fontSize(12).text("INVOICE TOTAL", totalsX, y);
+  doc.fontSize(14).text(`$${Number(data.total).toLocaleString("en-CA", { minimumFractionDigits: 2 })}`, totalsX + W * 0.2, y - 2, { width: W * 0.22, align: "right" });
+  y += 26;
+
+  if (data.status === "paid" && data.paidAt) {
+    const paidText = `PAID on ${fmtDateTime(data.paidAt)}${data.paymentMethod ? ` via ${data.paymentMethod}` : ""}`;
+    doc.fillColor(green).font("Helvetica-Bold").fontSize(8).text(paidText, totalsX, y, { width: W * 0.42, align: "right" });
+  }
+  y += 16;
+
+  for (const [title, text] of [["Notes", data.notes], ["Terms & Conditions", data.terms]] as const) {
+    if (!text) continue;
+    const height = doc.heightOfString(text, { width: W - 24, lineGap: 2 }) + 38;
+    pageBreak(height);
+    doc.fillColor(navy).font("Helvetica-Bold").fontSize(9).text(title.toUpperCase(), 44, y);
+    y += 17;
+    doc.roundedRect(44, y, W, height - 24, 3).fillAndStroke("#F8FAFC", border);
+    doc.fillColor(slate).font("Helvetica").fontSize(8.5).text(text, 56, y + 10, { width: W - 24, lineGap: 2 });
+    y += height - 12;
+  }
+
+  pageBreak(82);
+  y += 8;
+  doc.fillColor(muted).font("Helvetica").fontSize(8)
+    .text("Thank you for your business. Payment is due by the date specified above. Please include the invoice number with your payment.", 44, y, { width: W });
+
+  const pages = doc.bufferedPageRange();
+  for (let page = 0; page < pages.count; page++) {
+    doc.switchToPage(page);
+    const footerY = doc.page.height - 48;
+    doc.moveTo(44, footerY - 4).lineTo(44 + W, footerY - 4).strokeColor(border).lineWidth(0.5).stroke();
+    doc.fillColor(muted).font("Helvetica").fontSize(7)
+      .text(`mistri360  •  ${companyName}  •  ${data.invoiceNumber}`, 44, footerY + 2, { width: W / 2, height: 10, lineBreak: false })
+      .text(`INVOICE  •  Page ${page + 1} of ${pages.count}`, 44 + W / 2, footerY + 2, { width: W / 2, height: 10, align: "right", lineBreak: false });
+  }
+  doc.end();
+}
+
+// Generate estimate PDF as a Buffer for email attachments
+export async function generateEstimatePdfAsBuffer(data: EstimatePdfData, companyName = "Company Workspace"): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const doc = new PDFDocument({ margin: 44, size: "LETTER", bufferPages: true });
+
+    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    // Create a mock response to use the same header logic
+    const mockRes = {
+      setHeader: () => {},
+    } as any;
+
+    // Call the actual PDF generation with our doc
+    generateEstimatePdfContent(doc, data, companyName);
+    doc.end();
+  });
+}
+
+// Helper to generate the PDF content (shared between Response and Buffer versions)
+function generateEstimatePdfContent(doc: PDFKit.PDFDocument, data: EstimatePdfData, companyName: string) {
+  const W = doc.page.width - 88;
+  const navy = "#0A1628";
+  const slate = "#334155";
+  const muted = "#64748B";
+  const border = "#DCE3EA";
+  let y = 44;
 
   const pageBreak = (height: number) => {
     if (y + height > doc.page.height - 64) {
@@ -699,5 +914,4 @@ export function generateEstimatePdf(data: EstimatePdfData, res: Response, compan
       .text(`mistri360  •  ${companyName}  •  ${data.estimateNumber}`, 44, footerY + 2, { width: W / 2, height: 10, lineBreak: false })
       .text(`ESTIMATE  •  Page ${page + 1} of ${pages.count}`, 44 + W / 2, footerY + 2, { width: W / 2, height: 10, align: "right", lineBreak: false });
   }
-  doc.end();
 }

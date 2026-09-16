@@ -361,7 +361,11 @@ router.patch("/roadside-violations/:id", requireRole("admin", "manager", "mechan
 
 router.post("/compliance/check-pmcvi-reminders", requireRole("admin", "manager"), async (req, res): Promise<void> => {
   const REMINDER_THRESHOLDS = [90, 60, 30, 14, 7];
+
+  // Normalize today to midnight UTC to prevent timezone drift
   const today = new Date();
+  const todayStr = today.toISOString().split("T")[0]; // "YYYY-MM-DD"
+  const todayMs = new Date(todayStr + "T00:00:00.000Z").getTime();
 
   const records = await db
     .select({
@@ -385,7 +389,12 @@ router.post("/compliance/check-pmcvi-reminders", requireRole("admin", "manager")
 
   for (const record of records) {
     if (!record.expiryDate) continue;
-    const daysLeft = Math.round((new Date(record.expiryDate).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    // Normalize expiryDate to midnight UTC as well
+    const expiryDateStr = typeof record.expiryDate === 'string'
+      ? record.expiryDate.split("T")[0]  // Extract YYYY-MM-DD from ISO string
+      : record.expiryDate.toISOString().split("T")[0];
+    const expiryDateMs = new Date(expiryDateStr + "T00:00:00.000Z").getTime();
+    const daysLeft = Math.round((expiryDateMs - todayMs) / (1000 * 60 * 60 * 24));
 
     for (const threshold of REMINDER_THRESHOLDS) {
       if (daysLeft <= threshold && daysLeft >= 0) {

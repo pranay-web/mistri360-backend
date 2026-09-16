@@ -14,9 +14,12 @@
     "seed:vehicles": "tsx --env-file-if-exists=.env src/scripts/seed-vehicles.ts",
     "seed:fleet": "tsx --env-file-if-exists=.env src/scripts/seed-fleet-expansion.ts",
     "seed:work-orders": "tsx --env-file-if-exists=.env src/scripts/seed-work-orders.ts",
-    "seed:checklists": "tsx --env-file-if-exists=.env src/scripts/seed-checklists.ts"
+    "seed:checklists": "tsx --env-file-if-exists=.env src/scripts/seed-checklists.ts",
+    "seed:all": "npm run seed && npm run seed:vehicles && npm run seed:fleet && npm run seed:work-orders && npm run seed:checklists",
+    "migrate": "node --env-file-if-exists=.env src/scripts/migrate.js"
   },
   "dependencies": {
+    "@aws-sdk/client-ses": "^3.1132.0",
     "@google-cloud/storage": "^7.21.0",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
@@ -25,7 +28,10 @@
     "drizzle-zod": "^0.8.3",
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
     "google-auth-library": "^10.9.1",
+    "helmet": "^7.2.0",
+    "jsonwebtoken": "^9.0.2",
     "pdfkit": "^0.19.1",
     "pg": "^8.22.0",
     "pino": "^9.14.0",
@@ -37,6 +43,7 @@
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.2",
     "@types/node": "^22.13.1",
     "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.20.0",

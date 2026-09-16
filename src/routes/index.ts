@@ -14,6 +14,7 @@ import reportsRouter from "./reports.js";
 import platformRouter from "./platform.js";
 import customersRouter from "./customers.js";
 import estimatesRouter from "./estimates.js";
+import invoicesRouter from "./invoices.js";
 import { requireOperationalAuth } from "../middlewares/auth.js";
 
 const router: IRouter = Router();
@@ -26,6 +27,7 @@ router.use(platformRouter);
 router.use(requireOperationalAuth);
 router.use(customersRouter);
 router.use(estimatesRouter);
+router.use(invoicesRouter);
 router.use(fleetRouter);
 router.use(vehiclesRouter);
 router.use(workOrdersRouter);

@@ -1,19 +1,17 @@
-import { Readable } from 'stream';
 import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
 } from '@workspace/api-zod';
 import { Router, type IRouter, type Request, type Response } from 'express';
 
-import { ObjectPermission } from '../lib/objectAcl';
 import {
   ObjectNotFoundError,
-  ObjectStorageService,
-} from '../lib/objectStorage';
+  LocalObjectStorageService,
+} from '../lib/localObjectStorage';
 import { requireAuth } from '../middlewares/auth';
 
 const router: IRouter = Router();
-const objectStorageService = new ObjectStorageService();
+const objectStorageService = new LocalObjectStorageService();
 
 /**
  * POST /storage/uploads/request-url
@@ -55,76 +53,66 @@ router.post(
 );
 
 /**
- * GET /storage/public-objects/*
+ * PUT /storage/uploads/:objectId
  *
- * Serve assets from PUBLIC_OBJECT_SEARCH_PATHS.
- * Requires authentication — all storage endpoints in this app are restricted to
- * authenticated fleet users (no truly public assets are served from this app).
+ * Direct file upload endpoint for local disk storage.
+ * Client POSTs the file body directly to this endpoint.
  */
-router.get(
-  '/storage/public-objects/*filePath',
+router.put(
+  '/storage/uploads/:objectId',
   requireAuth,
   async (req: Request, res: Response) => {
     try {
-      const raw = req.params.filePath;
-      const filePath = Array.isArray(raw) ? raw.join('/') : raw;
-      const file = await objectStorageService.searchPublicObject(filePath);
-      if (!file) {
-        res.status(404).json({ error: 'File not found' });
-        return;
+      const { objectId } = req.params;
+
+      // Collect the request body
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(chunk);
       }
+      const buffer = Buffer.concat(chunks);
 
-      const response = await objectStorageService.downloadObject(file);
+      // Save the file
+      await objectStorageService.uploadFile(objectId, buffer);
 
-      res.status(response.status);
-      response.headers.forEach((value, key) => res.setHeader(key, value));
-
-      if (response.body) {
-        const nodeStream = Readable.fromWeb(
-          response.body as ReadableStream<Uint8Array>,
-        );
-        nodeStream.pipe(res);
-      } else {
-        res.end();
-      }
+      res.status(200).json({ success: true, objectPath: `/objects/${objectId}` });
     } catch (error) {
-      req.log.error({ err: error }, 'Error serving public object');
-      res.status(500).json({ error: 'Failed to serve public object' });
+      req.log.error({ err: error }, 'Error uploading file');
+      res.status(500).json({ error: 'Failed to upload file' });
     }
   },
 );
 
 /**
- * GET /storage/objects/*
+ * GET /storage/objects/:objectId
  *
- * Serve private object entities from PRIVATE_OBJECT_DIR.
+ * Serve private object entities from local disk storage.
  * Requires authentication. Only authenticated users may access stored assets
  * (work-order photos, signatures, invoices, etc.).
  */
 router.get(
-  '/storage/objects/*path',
+  '/storage/objects/:objectId',
   requireAuth,
   async (req: Request, res: Response) => {
     try {
-      const raw = req.params.path;
-      const wildcardPath = Array.isArray(raw) ? raw.join('/') : raw;
-      const objectPath = `/objects/${wildcardPath}`;
-      const objectFile =
-        await objectStorageService.getObjectEntityFile(objectPath);
+      const { objectId } = req.params;
 
-      const response = await objectStorageService.downloadObject(objectFile);
-
-      res.status(response.status);
-      response.headers.forEach((value, key) => res.setHeader(key, value));
-
-      if (response.body) {
-        const nodeStream = Readable.fromWeb(
-          response.body as ReadableStream<Uint8Array>,
-        );
-        nodeStream.pipe(res);
-      } else {
-        res.end();
+      // Check if file exists
+      const exists = await objectStorageService.fileExists(objectId);
+      if (!exists) {
+        res.status(404).json({ error: 'File not found' });
+        return;
       }
+
+      // Read and serve the file
+      const buffer = await objectStorageService.downloadFile(objectId);
+
+      // Set appropriate headers
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Length', buffer.length);
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+
+      res.status(200).send(buffer);
     } catch (error) {
       if (error instanceof ObjectNotFoundError) {
         req.log.warn({ err: error }, 'Object not found');

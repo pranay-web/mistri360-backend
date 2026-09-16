@@ -37,8 +37,14 @@ router.use("/work-orders/:id/checklist", requireAuth, async (req, res, next) => 
 const WO_TYPE_TO_CHECKLIST: Record<string, "pm1" | "pm2" | "trailer" | "reefer"> = {
   pm1: "pm1",
   pm2: "pm2",
+  greasing: "pm1",
   trailer_maintenance: "trailer",
   reefer_maintenance: "reefer",
+  driver_defect: "pm1",
+  breakdown: "pm1",
+  roadside_repair: "pm1",
+  pmcvi_prep: "pm2",
+  general_repair: "pm1",
 };
 
 type ChecklistItemStatus =
@@ -380,6 +386,24 @@ router.post("/work-orders/:id/checklist/submit", requireRole("admin", "mechanic"
 
   let defectsCreated = 0;
   for (const item of defectItems) {
+    // Check if defect already exists for this checklist item to prevent duplicates
+    const [existingDefect] = await db
+      .select({ id: defectsTable.id })
+      .from(defectsTable)
+      .where(
+        and(
+          eq(defectsTable.workOrderId, woId),
+          eq(defectsTable.checklistItemId, item.itemId),
+          eq(defectsTable.checklistInstanceId, instance.id)
+        )
+      )
+      .limit(1);
+
+    if (existingDefect) {
+      // Defect already exists, skip to prevent duplicate
+      continue;
+    }
+
     const severity =
       item.status === "out_of_service"
         ? "out_of_service"

@@ -23,8 +23,8 @@ export const HealthCheckResponse = zod.object({
 
 
 export const LoginBody = zod.object({
-  "email": zod.string(),
-  "password": zod.string().min(1)
+  "email": zod.string().email().max(100),
+  "password": zod.string().trim().min(1).max(128)
 })
 
 export const LoginResponse = zod.object({
@@ -76,10 +76,10 @@ export const GetDashboardPmComplianceResponse = zod.object({
   "compliant": zod.number(),
   "noSchedule": zod.number(),
   "slices": zod.array(zod.object({
-  "name": zod.string(),
-  "value": zod.number(),
-  "color": zod.string()
-}))
+    "name": zod.string(),
+    "value": zod.number(),
+    "color": zod.string()
+  }))
 })
 
 
@@ -152,29 +152,29 @@ export const GetReportPmComplianceQueryParams = zod.object({
 
 export const GetReportPmComplianceResponse = zod.object({
   "rows": zod.array(zod.object({
-  "vehicleId": zod.number().optional(),
-  "unitNumber": zod.string().optional(),
-  "make": zod.string().optional(),
-  "model": zod.string().optional(),
-  "type": zod.string().nullish(),
-  "vehicleStatus": zod.string().optional(),
-  "currentOdometer": zod.number().nullish(),
-  "pm1DueDate": zod.string().nullish(),
-  "pm1Status": zod.string().optional(),
-  "pm1DaysUntilDue": zod.number().nullish(),
-  "lastPm1Completed": zod.string().nullish(),
-  "pm2DueDate": zod.string().nullish(),
-  "pm2Status": zod.string().optional(),
-  "pm2DaysUntilDue": zod.number().nullish(),
-  "lastPm2Completed": zod.string().nullish()
-})),
+    "vehicleId": zod.number().optional(),
+    "unitNumber": zod.string().optional(),
+    "make": zod.string().optional(),
+    "model": zod.string().optional(),
+    "type": zod.string().nullish(),
+    "vehicleStatus": zod.string().optional(),
+    "currentOdometer": zod.number().nullish(),
+    "pm1DueDate": zod.string().nullish(),
+    "pm1Status": zod.string().optional(),
+    "pm1DaysUntilDue": zod.number().nullish(),
+    "lastPm1Completed": zod.string().nullish(),
+    "pm2DueDate": zod.string().nullish(),
+    "pm2Status": zod.string().optional(),
+    "pm2DaysUntilDue": zod.number().nullish(),
+    "lastPm2Completed": zod.string().nullish()
+  })),
   "summary": zod.object({
-  "total": zod.number().optional(),
-  "compliant": zod.number().optional(),
-  "pm1Overdue": zod.number().optional(),
-  "pm2Overdue": zod.number().optional(),
-  "complianceRate": zod.number().optional()
-})
+    "total": zod.number().optional(),
+    "compliant": zod.number().optional(),
+    "pm1Overdue": zod.number().optional(),
+    "pm2Overdue": zod.number().optional(),
+    "complianceRate": zod.number().optional()
+  })
 })
 
 
@@ -397,7 +397,7 @@ export const ListVehiclesResponseItem = zod.object({
   "greasingDueDate": zod.string().nullish(),
   "pmcviDueDate": zod.string().nullish(),
   "usAnnualDueDate": zod.string().nullish(),
-  "pmUrgency": zod.union([zod.literal('overdue'),zod.literal('due_soon'),zod.literal('ok'),zod.literal(null)]).nullish()
+  "pmUrgency": zod.union([zod.literal('overdue'), zod.literal('due_soon'), zod.literal('ok'), zod.literal(null)]).nullish()
 })
 export const ListVehiclesResponse = zod.array(ListVehiclesResponseItem)
 
@@ -686,12 +686,12 @@ export const UpsertVehiclePmSchedulesParams = zod.object({
 
 export const UpsertVehiclePmSchedulesBody = zod.object({
   "schedules": zod.array(zod.object({
-  "pmType": zod.enum(['pm1', 'pm2', 'greasing', 'pmcvi', 'us_annual']),
-  "intervalKm": zod.number().nullish(),
-  "intervalEngineHours": zod.number().nullish(),
-  "intervalReeferHours": zod.number().nullish(),
-  "intervalDays": zod.number().nullish()
-}))
+    "pmType": zod.enum(['pm1', 'pm2', 'greasing', 'pmcvi', 'us_annual']),
+    "intervalKm": zod.number().nullish(),
+    "intervalEngineHours": zod.number().nullish(),
+    "intervalReeferHours": zod.number().nullish(),
+    "intervalDays": zod.number().nullish()
+  }))
 })
 
 export const UpsertVehiclePmSchedulesResponseItem = zod.object({
@@ -893,80 +893,80 @@ export const GetWorkOrderResponse = zod.object({
   "createdAt": zod.string(),
   "updatedAt": zod.string(),
   "parts": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "vendorName": zod.string(),
-  "partDescription": zod.string(),
-  "partNumber": zod.string().nullish(),
-  "invoiceNumber": zod.string().nullish(),
-  "quantity": zod.string(),
-  "unitCost": zod.string(),
-  "totalCost": zod.string(),
-  "invoiceFileKey": zod.string().nullish(),
-  "addedByUserId": zod.number().nullish(),
-  "createdAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "vendorName": zod.string(),
+    "partDescription": zod.string(),
+    "partNumber": zod.string().nullish(),
+    "invoiceNumber": zod.string().nullish(),
+    "quantity": zod.string(),
+    "unitCost": zod.string(),
+    "totalCost": zod.string(),
+    "invoiceFileKey": zod.string().nullish(),
+    "addedByUserId": zod.number().nullish(),
+    "createdAt": zod.string()
+  })),
   "photos": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "photoType": zod.string(),
-  "fileKey": zod.string(),
-  "caption": zod.string().nullish(),
-  "uploadedByUserId": zod.number().nullish(),
-  "createdAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "photoType": zod.string(),
+    "fileKey": zod.string(),
+    "caption": zod.string().nullish(),
+    "uploadedByUserId": zod.number().nullish(),
+    "createdAt": zod.string()
+  })),
   "statusHistory": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "fromStatus": zod.string().nullish(),
-  "toStatus": zod.string(),
-  "changedByUserId": zod.number(),
-  "changedByName": zod.string().nullish(),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "fromStatus": zod.string().nullish(),
+    "toStatus": zod.string(),
+    "changedByUserId": zod.number(),
+    "changedByName": zod.string().nullish(),
+    "notes": zod.string().nullish(),
+    "createdAt": zod.string()
+  })),
   "comments": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "authorId": zod.number(),
-  "authorName": zod.string().nullish(),
-  "body": zod.string(),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().optional()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "authorId": zod.number(),
+    "authorName": zod.string().nullish(),
+    "body": zod.string(),
+    "createdAt": zod.string(),
+    "updatedAt": zod.string().optional()
+  })),
   "labour": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "mechanicId": zod.number(),
-  "mechanicName": zod.string().nullish(),
-  "startTime": zod.string(),
-  "endTime": zod.string().nullish(),
-  "hoursWorked": zod.string().nullish(),
-  "labourType": zod.string().optional(),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "mechanicId": zod.number(),
+    "mechanicName": zod.string().nullish(),
+    "startTime": zod.string(),
+    "endTime": zod.string().nullish(),
+    "hoursWorked": zod.string().nullish(),
+    "labourType": zod.string().optional(),
+    "notes": zod.string().nullish(),
+    "createdAt": zod.string()
+  })),
   "signatures": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number().nullable(),
-  "signatureType": zod.string(),
-  "signedByUserId": zod.number(),
-  "signedByName": zod.string().nullish(),
-  "signatureImageKey": zod.string(),
-  "signedAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number().nullable(),
+    "signatureType": zod.string(),
+    "signedByUserId": zod.number(),
+    "signedByName": zod.string().nullish(),
+    "signatureImageKey": zod.string(),
+    "signedAt": zod.string()
+  })),
   "invoices": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number().nullable(),
-  "vendorName": zod.string(),
-  "invoiceNumber": zod.string(),
-  "invoiceDate": zod.string().nullish(),
-  "totalAmount": zod.string(),
-  "fileKey": zod.string().nullish(),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().optional()
-}))
+    "id": zod.number(),
+    "workOrderId": zod.number().nullable(),
+    "vendorName": zod.string(),
+    "invoiceNumber": zod.string(),
+    "invoiceDate": zod.string().nullish(),
+    "totalAmount": zod.string(),
+    "fileKey": zod.string().nullish(),
+    "notes": zod.string().nullish(),
+    "createdAt": zod.string(),
+    "updatedAt": zod.string().optional()
+  }))
 })
 
 
@@ -1022,80 +1022,80 @@ export const UpdateWorkOrderResponse = zod.object({
   "createdAt": zod.string(),
   "updatedAt": zod.string(),
   "parts": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "vendorName": zod.string(),
-  "partDescription": zod.string(),
-  "partNumber": zod.string().nullish(),
-  "invoiceNumber": zod.string().nullish(),
-  "quantity": zod.string(),
-  "unitCost": zod.string(),
-  "totalCost": zod.string(),
-  "invoiceFileKey": zod.string().nullish(),
-  "addedByUserId": zod.number().nullish(),
-  "createdAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "vendorName": zod.string(),
+    "partDescription": zod.string(),
+    "partNumber": zod.string().nullish(),
+    "invoiceNumber": zod.string().nullish(),
+    "quantity": zod.string(),
+    "unitCost": zod.string(),
+    "totalCost": zod.string(),
+    "invoiceFileKey": zod.string().nullish(),
+    "addedByUserId": zod.number().nullish(),
+    "createdAt": zod.string()
+  })),
   "photos": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "photoType": zod.string(),
-  "fileKey": zod.string(),
-  "caption": zod.string().nullish(),
-  "uploadedByUserId": zod.number().nullish(),
-  "createdAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "photoType": zod.string(),
+    "fileKey": zod.string(),
+    "caption": zod.string().nullish(),
+    "uploadedByUserId": zod.number().nullish(),
+    "createdAt": zod.string()
+  })),
   "statusHistory": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "fromStatus": zod.string().nullish(),
-  "toStatus": zod.string(),
-  "changedByUserId": zod.number(),
-  "changedByName": zod.string().nullish(),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "fromStatus": zod.string().nullish(),
+    "toStatus": zod.string(),
+    "changedByUserId": zod.number(),
+    "changedByName": zod.string().nullish(),
+    "notes": zod.string().nullish(),
+    "createdAt": zod.string()
+  })),
   "comments": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "authorId": zod.number(),
-  "authorName": zod.string().nullish(),
-  "body": zod.string(),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().optional()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "authorId": zod.number(),
+    "authorName": zod.string().nullish(),
+    "body": zod.string(),
+    "createdAt": zod.string(),
+    "updatedAt": zod.string().optional()
+  })),
   "labour": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "mechanicId": zod.number(),
-  "mechanicName": zod.string().nullish(),
-  "startTime": zod.string(),
-  "endTime": zod.string().nullish(),
-  "hoursWorked": zod.string().nullish(),
-  "labourType": zod.string().optional(),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "mechanicId": zod.number(),
+    "mechanicName": zod.string().nullish(),
+    "startTime": zod.string(),
+    "endTime": zod.string().nullish(),
+    "hoursWorked": zod.string().nullish(),
+    "labourType": zod.string().optional(),
+    "notes": zod.string().nullish(),
+    "createdAt": zod.string()
+  })),
   "signatures": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number().nullable(),
-  "signatureType": zod.string(),
-  "signedByUserId": zod.number(),
-  "signedByName": zod.string().nullish(),
-  "signatureImageKey": zod.string(),
-  "signedAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number().nullable(),
+    "signatureType": zod.string(),
+    "signedByUserId": zod.number(),
+    "signedByName": zod.string().nullish(),
+    "signatureImageKey": zod.string(),
+    "signedAt": zod.string()
+  })),
   "invoices": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number().nullable(),
-  "vendorName": zod.string(),
-  "invoiceNumber": zod.string(),
-  "invoiceDate": zod.string().nullish(),
-  "totalAmount": zod.string(),
-  "fileKey": zod.string().nullish(),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().optional()
-}))
+    "id": zod.number(),
+    "workOrderId": zod.number().nullable(),
+    "vendorName": zod.string(),
+    "invoiceNumber": zod.string(),
+    "invoiceDate": zod.string().nullish(),
+    "totalAmount": zod.string(),
+    "fileKey": zod.string().nullish(),
+    "notes": zod.string().nullish(),
+    "createdAt": zod.string(),
+    "updatedAt": zod.string().optional()
+  }))
 })
 
 
@@ -1158,80 +1158,80 @@ export const TransitionWorkOrderStatusResponse = zod.object({
   "createdAt": zod.string(),
   "updatedAt": zod.string(),
   "parts": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "vendorName": zod.string(),
-  "partDescription": zod.string(),
-  "partNumber": zod.string().nullish(),
-  "invoiceNumber": zod.string().nullish(),
-  "quantity": zod.string(),
-  "unitCost": zod.string(),
-  "totalCost": zod.string(),
-  "invoiceFileKey": zod.string().nullish(),
-  "addedByUserId": zod.number().nullish(),
-  "createdAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "vendorName": zod.string(),
+    "partDescription": zod.string(),
+    "partNumber": zod.string().nullish(),
+    "invoiceNumber": zod.string().nullish(),
+    "quantity": zod.string(),
+    "unitCost": zod.string(),
+    "totalCost": zod.string(),
+    "invoiceFileKey": zod.string().nullish(),
+    "addedByUserId": zod.number().nullish(),
+    "createdAt": zod.string()
+  })),
   "photos": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "photoType": zod.string(),
-  "fileKey": zod.string(),
-  "caption": zod.string().nullish(),
-  "uploadedByUserId": zod.number().nullish(),
-  "createdAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "photoType": zod.string(),
+    "fileKey": zod.string(),
+    "caption": zod.string().nullish(),
+    "uploadedByUserId": zod.number().nullish(),
+    "createdAt": zod.string()
+  })),
   "statusHistory": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "fromStatus": zod.string().nullish(),
-  "toStatus": zod.string(),
-  "changedByUserId": zod.number(),
-  "changedByName": zod.string().nullish(),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "fromStatus": zod.string().nullish(),
+    "toStatus": zod.string(),
+    "changedByUserId": zod.number(),
+    "changedByName": zod.string().nullish(),
+    "notes": zod.string().nullish(),
+    "createdAt": zod.string()
+  })),
   "comments": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "authorId": zod.number(),
-  "authorName": zod.string().nullish(),
-  "body": zod.string(),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().optional()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "authorId": zod.number(),
+    "authorName": zod.string().nullish(),
+    "body": zod.string(),
+    "createdAt": zod.string(),
+    "updatedAt": zod.string().optional()
+  })),
   "labour": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number(),
-  "mechanicId": zod.number(),
-  "mechanicName": zod.string().nullish(),
-  "startTime": zod.string(),
-  "endTime": zod.string().nullish(),
-  "hoursWorked": zod.string().nullish(),
-  "labourType": zod.string().optional(),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number(),
+    "mechanicId": zod.number(),
+    "mechanicName": zod.string().nullish(),
+    "startTime": zod.string(),
+    "endTime": zod.string().nullish(),
+    "hoursWorked": zod.string().nullish(),
+    "labourType": zod.string().optional(),
+    "notes": zod.string().nullish(),
+    "createdAt": zod.string()
+  })),
   "signatures": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number().nullable(),
-  "signatureType": zod.string(),
-  "signedByUserId": zod.number(),
-  "signedByName": zod.string().nullish(),
-  "signatureImageKey": zod.string(),
-  "signedAt": zod.string()
-})),
+    "id": zod.number(),
+    "workOrderId": zod.number().nullable(),
+    "signatureType": zod.string(),
+    "signedByUserId": zod.number(),
+    "signedByName": zod.string().nullish(),
+    "signatureImageKey": zod.string(),
+    "signedAt": zod.string()
+  })),
   "invoices": zod.array(zod.object({
-  "id": zod.number(),
-  "workOrderId": zod.number().nullable(),
-  "vendorName": zod.string(),
-  "invoiceNumber": zod.string(),
-  "invoiceDate": zod.string().nullish(),
-  "totalAmount": zod.string(),
-  "fileKey": zod.string().nullish(),
-  "notes": zod.string().nullish(),
-  "createdAt": zod.string(),
-  "updatedAt": zod.string().optional()
-}))
+    "id": zod.number(),
+    "workOrderId": zod.number().nullable(),
+    "vendorName": zod.string(),
+    "invoiceNumber": zod.string(),
+    "invoiceDate": zod.string().nullish(),
+    "totalAmount": zod.string(),
+    "fileKey": zod.string().nullish(),
+    "notes": zod.string().nullish(),
+    "createdAt": zod.string(),
+    "updatedAt": zod.string().optional()
+  }))
 })
 
 
@@ -1510,13 +1510,13 @@ export const CreateDefectResponse = zod.object({
   "createdAt": zod.string(),
   "updatedAt": zod.string().optional(),
   "photos": zod.array(zod.object({
-  "id": zod.number(),
-  "defectId": zod.number(),
-  "fileKey": zod.string(),
-  "caption": zod.string().nullish(),
-  "uploadedByUserId": zod.number().nullish(),
-  "createdAt": zod.string()
-}))
+    "id": zod.number(),
+    "defectId": zod.number(),
+    "fileKey": zod.string(),
+    "caption": zod.string().nullish(),
+    "uploadedByUserId": zod.number().nullish(),
+    "createdAt": zod.string()
+  }))
 })
 
 
@@ -1549,13 +1549,13 @@ export const GetDefectResponse = zod.object({
   "createdAt": zod.string(),
   "updatedAt": zod.string().optional(),
   "photos": zod.array(zod.object({
-  "id": zod.number(),
-  "defectId": zod.number(),
-  "fileKey": zod.string(),
-  "caption": zod.string().nullish(),
-  "uploadedByUserId": zod.number().nullish(),
-  "createdAt": zod.string()
-}))
+    "id": zod.number(),
+    "defectId": zod.number(),
+    "fileKey": zod.string(),
+    "caption": zod.string().nullish(),
+    "uploadedByUserId": zod.number().nullish(),
+    "createdAt": zod.string()
+  }))
 })
 
 
@@ -1595,13 +1595,13 @@ export const UpdateDefectResponse = zod.object({
   "createdAt": zod.string(),
   "updatedAt": zod.string().optional(),
   "photos": zod.array(zod.object({
-  "id": zod.number(),
-  "defectId": zod.number(),
-  "fileKey": zod.string(),
-  "caption": zod.string().nullish(),
-  "uploadedByUserId": zod.number().nullish(),
-  "createdAt": zod.string()
-}))
+    "id": zod.number(),
+    "defectId": zod.number(),
+    "fileKey": zod.string(),
+    "caption": zod.string().nullish(),
+    "uploadedByUserId": zod.number().nullish(),
+    "createdAt": zod.string()
+  }))
 })
 
 
@@ -2057,23 +2057,23 @@ export const GetWorkOrderChecklistResponse = zod.object({
   "isLocked": zod.boolean(),
   "createdAt": zod.string(),
   "items": zod.array(zod.object({
-  "itemId": zod.number(),
-  "templateId": zod.number(),
-  "category": zod.string(),
-  "itemDescription": zod.string(),
-  "requiresMeasurement": zod.boolean(),
-  "measurementUnit": zod.string().nullish(),
-  "sortOrder": zod.number(),
-  "active": zod.boolean(),
-  "responseId": zod.number().nullish(),
-  "status": zod.union([zod.literal('pass'),zod.literal('monitor'),zod.literal('repair_required'),zod.literal('major_defect'),zod.literal('out_of_service'),zod.literal('n_a'),zod.literal(null)]).nullish(),
-  "notes": zod.string().nullish(),
-  "measurement": zod.string().nullish(),
-  "photoFileKey": zod.string().nullish(),
-  "respondedByUserId": zod.number().nullish(),
-  "respondedByName": zod.string().nullish(),
-  "respondedAt": zod.string().nullish()
-})),
+    "itemId": zod.number(),
+    "templateId": zod.number(),
+    "category": zod.string(),
+    "itemDescription": zod.string(),
+    "requiresMeasurement": zod.boolean(),
+    "measurementUnit": zod.string().nullish(),
+    "sortOrder": zod.number(),
+    "active": zod.boolean(),
+    "responseId": zod.number().nullish(),
+    "status": zod.union([zod.literal('pass'), zod.literal('monitor'), zod.literal('repair_required'), zod.literal('major_defect'), zod.literal('out_of_service'), zod.literal('n_a'), zod.literal(null)]).nullish(),
+    "notes": zod.string().nullish(),
+    "measurement": zod.string().nullish(),
+    "photoFileKey": zod.string().nullish(),
+    "respondedByUserId": zod.number().nullish(),
+    "respondedByName": zod.string().nullish(),
+    "respondedAt": zod.string().nullish()
+  })),
   "completedCount": zod.number(),
   "totalCount": zod.number()
 })
@@ -2104,7 +2104,7 @@ export const SaveChecklistItemResponseResponse = zod.object({
   "sortOrder": zod.number(),
   "active": zod.boolean(),
   "responseId": zod.number().nullish(),
-  "status": zod.union([zod.literal('pass'),zod.literal('monitor'),zod.literal('repair_required'),zod.literal('major_defect'),zod.literal('out_of_service'),zod.literal('n_a'),zod.literal(null)]).nullish(),
+  "status": zod.union([zod.literal('pass'), zod.literal('monitor'), zod.literal('repair_required'), zod.literal('major_defect'), zod.literal('out_of_service'), zod.literal('n_a'), zod.literal(null)]).nullish(),
   "notes": zod.string().nullish(),
   "measurement": zod.string().nullish(),
   "photoFileKey": zod.string().nullish(),
@@ -2172,23 +2172,23 @@ export const GetChecklistResponse = zod.object({
   "isLocked": zod.boolean(),
   "createdAt": zod.string(),
   "items": zod.array(zod.object({
-  "itemId": zod.number(),
-  "templateId": zod.number(),
-  "category": zod.string(),
-  "itemDescription": zod.string(),
-  "requiresMeasurement": zod.boolean(),
-  "measurementUnit": zod.string().nullish(),
-  "sortOrder": zod.number(),
-  "active": zod.boolean(),
-  "responseId": zod.number().nullish(),
-  "status": zod.union([zod.literal('pass'),zod.literal('monitor'),zod.literal('repair_required'),zod.literal('major_defect'),zod.literal('out_of_service'),zod.literal('n_a'),zod.literal(null)]).nullish(),
-  "notes": zod.string().nullish(),
-  "measurement": zod.string().nullish(),
-  "photoFileKey": zod.string().nullish(),
-  "respondedByUserId": zod.number().nullish(),
-  "respondedByName": zod.string().nullish(),
-  "respondedAt": zod.string().nullish()
-})),
+    "itemId": zod.number(),
+    "templateId": zod.number(),
+    "category": zod.string(),
+    "itemDescription": zod.string(),
+    "requiresMeasurement": zod.boolean(),
+    "measurementUnit": zod.string().nullish(),
+    "sortOrder": zod.number(),
+    "active": zod.boolean(),
+    "responseId": zod.number().nullish(),
+    "status": zod.union([zod.literal('pass'), zod.literal('monitor'), zod.literal('repair_required'), zod.literal('major_defect'), zod.literal('out_of_service'), zod.literal('n_a'), zod.literal(null)]).nullish(),
+    "notes": zod.string().nullish(),
+    "measurement": zod.string().nullish(),
+    "photoFileKey": zod.string().nullish(),
+    "respondedByUserId": zod.number().nullish(),
+    "respondedByName": zod.string().nullish(),
+    "respondedAt": zod.string().nullish()
+  })),
   "completedCount": zod.number(),
   "totalCount": zod.number()
 })

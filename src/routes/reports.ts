@@ -31,8 +31,14 @@ function getReportBrandLogo() {
 router.use("/reports", requireAuth, async (req, res, next) => {
   const rawVehicleId = req.query.vehicleId;
   const rawMechanicId = req.query.mechanicId;
-  const vehicleId = rawVehicleId == null ? null : Number(Array.isArray(rawVehicleId) ? rawVehicleId[0] : rawVehicleId);
-  const mechanicId = rawMechanicId == null ? null : Number(Array.isArray(rawMechanicId) ? rawMechanicId[0] : rawMechanicId);
+
+  // Handle "all" sentinel value and convert to null
+  const vehicleIdStr = Array.isArray(rawVehicleId) ? rawVehicleId[0] : rawVehicleId;
+  const mechanicIdStr = Array.isArray(rawMechanicId) ? rawMechanicId[0] : rawMechanicId;
+
+  const vehicleId = (vehicleIdStr == null || vehicleIdStr === "all") ? null : Number(vehicleIdStr);
+  const mechanicId = (mechanicIdStr == null || mechanicIdStr === "all") ? null : Number(mechanicIdStr);
+
   if ((vehicleId !== null && (!Number.isInteger(vehicleId) || vehicleId <= 0)) ||
       (mechanicId !== null && (!Number.isInteger(mechanicId) || mechanicId <= 0))) {
     res.status(400).json({ error: "Invalid report filter" });

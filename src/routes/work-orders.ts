@@ -43,7 +43,7 @@ import {
   AddWorkOrderInvoiceBody,
 } from "@workspace/api-zod";
 import { requireAuth, requireRole } from "../middlewares/auth.js";
-import { ObjectStorageService } from "../lib/objectStorage.js";
+import { LocalObjectStorageService } from "../lib/localObjectStorage.js";
 import { generateWorkOrderPdf } from "../lib/pdf-generator.js";
 import { loadChecklistDetail } from "./checklists.js";
 
@@ -66,7 +66,7 @@ router.use("/work-orders/:id", requireAuth, async (req, res, next) => {
   }
   next();
 });
-const objectStorageService = new ObjectStorageService();
+const objectStorageService = new LocalObjectStorageService();
 
 // ── State machine ─────────────────────────────────────────────────────────────
 
@@ -592,32 +592,42 @@ router.post("/work-orders/:id/parts", requireAuth, requireRole("admin", "manager
   const [wo] = await db.select().from(workOrdersTable).where(eq(workOrdersTable.id, id));
   if (!wo) { res.status(404).json({ error: "Work order not found" }); return; }
 
-  const userId = req.user!.id;
-  const qty = parseFloat(parsed.data.quantity ?? "1");
-  const unit = parseFloat(parsed.data.unitCost);
-  const total = (qty * unit).toFixed(2);
+  try {
+    // Wrap in transaction to prevent race condition on parts cost calculation
+    const result = await db.transaction(async (tx) => {
+      const userId = req.user!.id;
+      const qty = parseFloat(parsed.data.quantity ?? "1");
+      const unit = parseFloat(parsed.data.unitCost);
+      const total = (qty * unit).toFixed(2);
 
-  const [part] = await db
-    .insert(partsUsedTable)
-    .values({
-      workOrderId: id,
-      vendorName: parsed.data.vendorName,
-      partDescription: parsed.data.partDescription,
-      partNumber: parsed.data.partNumber ?? null,
-      invoiceNumber: parsed.data.invoiceNumber ?? null,
-      quantity: String(qty),
-      unitCost: String(unit),
-      totalCost: total,
-      addedByUserId: userId,
-    })
-    .returning();
+      const [part] = await tx
+        .insert(partsUsedTable)
+        .values({
+          workOrderId: id,
+          vendorName: parsed.data.vendorName,
+          partDescription: parsed.data.partDescription,
+          partNumber: parsed.data.partNumber ?? null,
+          invoiceNumber: parsed.data.invoiceNumber ?? null,
+          quantity: String(qty),
+          unitCost: String(unit),
+          totalCost: total,
+          addedByUserId: userId,
+        })
+        .returning();
 
-  // Recalculate total parts cost
-  const allParts = await db.select().from(partsUsedTable).where(eq(partsUsedTable.workOrderId, id));
-  const totalPartsCost = allParts.reduce((s, p) => s + parseFloat(p.totalCost), 0).toFixed(2);
-  await db.update(workOrdersTable).set({ totalPartsCost, updatedAt: new Date() }).where(eq(workOrdersTable.id, id));
+      // Recalculate total parts cost atomically
+      const allParts = await tx.select().from(partsUsedTable).where(eq(partsUsedTable.workOrderId, id));
+      const totalPartsCost = allParts.reduce((s, p) => s + parseFloat(p.totalCost), 0).toFixed(2);
+      await tx.update(workOrdersTable).set({ totalPartsCost, updatedAt: new Date() }).where(eq(workOrdersTable.id, id));
 
-  res.status(201).json(part);
+      return part;
+    });
+
+    res.status(201).json(result);
+  } catch (error: any) {
+    req.log.error({ err: error }, "Error adding part to work order");
+    res.status(500).json({ error: "Failed to add part to work order" });
+  }
 });
 
 // ── DELETE /work-orders/:id/parts/:partId ─────────────────────────────────────

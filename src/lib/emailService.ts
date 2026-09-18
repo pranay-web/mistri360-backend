@@ -1,18 +1,15 @@
 import { SESClient, SendEmailCommand, SendRawEmailCommand } from "@aws-sdk/client-ses";
 import { logger } from "./logger.js";
 
-// Validate required environment variables at module load time
+// Email configuration - optional for development
 const SES_FROM_EMAIL = process.env.SES_FROM_EMAIL;
 const AWS_REGION = process.env.AWS_REGION || "us-east-1";
+const EMAIL_ENABLED = !!SES_FROM_EMAIL;
 
-if (!SES_FROM_EMAIL) {
-  throw new Error(
-    "SES_FROM_EMAIL environment variable is required but was not provided. " +
-    "Set it to a verified SES identity (email address or domain)."
-  );
+let sesClient: SESClient | null = null;
+if (EMAIL_ENABLED) {
+  sesClient = new SESClient({ region: AWS_REGION });
 }
-
-const sesClient = new SESClient({ region: AWS_REGION });
 
 export interface EmailOptions {
   to: string;
@@ -31,6 +28,18 @@ export async function sendEmail(options: EmailOptions): Promise<{
   messageId?: string;
   error?: string;
 }> {
+  // If email is disabled, return success (mock mode)
+  if (!EMAIL_ENABLED) {
+    logger.warn(
+      { to: options.to, subject: options.subject },
+      "Email service disabled - email not sent (set SES_FROM_EMAIL to enable)"
+    );
+    return {
+      success: true,
+      messageId: "mock-" + Date.now(),
+    };
+  }
+
   try {
     const toAddresses = [options.to];
     const ccAddresses = options.cc && options.cc.length > 0 ? options.cc : [];
@@ -46,7 +55,7 @@ export async function sendEmail(options: EmailOptions): Promise<{
     }
 
     const command = new SendEmailCommand({
-      Source: SES_FROM_EMAIL,
+      Source: SES_FROM_EMAIL!,
       Destination: {
         ToAddresses: toAddresses,
         CcAddresses: ccAddresses.length > 0 ? ccAddresses : undefined,
@@ -59,7 +68,7 @@ export async function sendEmail(options: EmailOptions): Promise<{
       },
     });
 
-    const response = await sesClient.send(command);
+    const response = await sesClient!.send(command);
     logger.info(
       { messageId: response.MessageId, to: options.to },
       "Email sent successfully"
@@ -89,12 +98,24 @@ async function sendRawEmailWithAttachment(
   htmlBody: string,
   attachment: { filename: string; content: Buffer; contentType: string }
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  // If email is disabled, return success (mock mode)
+  if (!EMAIL_ENABLED) {
+    logger.warn(
+      { to, subject, attachment: attachment.filename },
+      "Email service disabled - email with attachment not sent"
+    );
+    return {
+      success: true,
+      messageId: "mock-" + Date.now(),
+    };
+  }
+
   try {
     const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).substring(2)}`;
     const base64Content = attachment.content.toString("base64");
 
     const rawMimeLines = [
-      `From: ${SES_FROM_EMAIL}`,
+      `From: ${SES_FROM_EMAIL!}`,
       `To: ${to}`,
       ...(cc.length > 0 ? [`Cc: ${cc.join(", ")}`] : []),
       `Subject: =?UTF-8?B?${Buffer.from(subject).toString("base64")}?=`,
@@ -126,7 +147,7 @@ async function sendRawEmailWithAttachment(
       },
     });
 
-    const response = await sesClient.send(command);
+    const response = await sesClient!.send(command);
 
     logger.info(
       { messageId: response.MessageId, to },
@@ -147,5 +168,5 @@ async function sendRawEmailWithAttachment(
   }
 }
 
-export { SES_FROM_EMAIL };
+export { SES_FROM_EMAIL, EMAIL_ENABLED };
 
